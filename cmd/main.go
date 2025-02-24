@@ -57,9 +57,13 @@ func main() {
 		Verbose:        verbose,
 	}
 
-	log.Printf("Starting installation on %s", remoteHost)
+	if config.Verbose {
+		log.Printf("Starting installation on %s", remoteHost)
+	}
 	if err := binaryinstall.InstallBinaries(config); err != nil {
 		log.Fatalf("Installation failed: %v", err)
 	}
-	fmt.Println("Binaries installed successfully.")
+	if config.Verbose {
+		fmt.Println("Binaries installed successfully.")
+	}
 }

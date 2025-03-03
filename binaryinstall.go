@@ -55,7 +55,7 @@ if [ -f "{{.DestinationDir}}/{{.BinaryName}}" ]; then
 fi
 
 # 6) Copy the new binary to destination
-cp "{{.TempDir}}/{{.BinaryName}}" "{{.DestinationDir}}"
+sudo cp "{{.TempDir}}/{{.BinaryName}}" "{{.DestinationDir}}"
 
 # 7) Set ownership
 sudo chown {{.Owner}}:{{.Owner}} "{{.DestinationDir}}/{{.BinaryName}}"

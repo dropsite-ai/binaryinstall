@@ -112,15 +112,6 @@ func InstallBinaries(config BinaryInstallConfig) error {
 	return nil
 }
 
-// EnsureRemoteDirectoryExists ensures the given directory path exists on the remote host.
-func EnsureRemoteDirectoryExists(config BinaryInstallConfig, remoteDir string) error {
-	command := fmt.Sprintf("mkdir -p %q", remoteDir)
-	if _, err := executeSSHCommand(config, command); err != nil {
-		return fmt.Errorf("failed to create remote directory %s: %w", remoteDir, err)
-	}
-	return nil
-}
-
 // processUploadSingleCommand does every step in one single SSH call
 // by rendering scriptTemplate with the appropriate data.
 func processUploadSingleCommand(config BinaryInstallConfig, uploadPath string) error {

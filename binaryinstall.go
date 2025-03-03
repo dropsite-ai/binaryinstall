@@ -51,7 +51,7 @@ mkdir -p "{{.BackupDir}}"
 
 # 5) Backup existing binary if it exists
 if [ -f "{{.DestinationDir}}/{{.BinaryName}}" ]; then
-    mv "{{.DestinationDir}}/{{.BinaryName}}" "{{.BackupDir}}"/
+    sudo mv "{{.DestinationDir}}/{{.BinaryName}}" "{{.BackupDir}}"/
 fi
 
 # 6) Copy the new binary to destination

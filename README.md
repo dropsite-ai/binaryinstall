@@ -42,45 +42,60 @@ Grab the latest pre-built binaries from the [GitHub Releases](https://github.com
 
 ### Go Package Usage
 
-You can import the package into your Go project and call its API directly. The binary name is automatically derived from each archive's filename by stripping the `.tar.gz` extension and taking the substring before the first underscore. For example, consider the following code:
+You can import the package into your Go project and call its API directly. Instead of a plain string slice, each “upload” can now specify `Path`, `DestinationDir`, `Owner`, `Permission`, and a boolean `BindLowPorts`.
+
+Example:
 
 ```go
 package main
 
 import (
-	"log"
+    "log"
 
-	"github.com/dropsite-ai/binaryinstall"
+    "github.com/dropsite-ai/binaryinstall"
 )
 
 func main() {
-	config := binaryinstall.BinaryInstallConfig{
-		RemoteHost:     "ec2-12-34-56-78.compute-1.amazonaws.com",
-		SSHUser:        "ec2-user",
-		SSHKeyPath:     "/path/to/ssh-key.pem",
-		// Specify one or more archive paths.
-		// The uncompressed binary name will be derived automatically from each filename.
-		UploadPaths: []string{
-			"/home/ec2-user/llmfs_Darwin_arm64.tar.gz",
-			"/home/ec2-user/llmfs_Linux_x86_64.tar.gz",
-		},
-		DestinationDir: "/usr/local/bin",
-		BackupDir:      "/home/ec2-user/bin.old",
-		Owner:          "root",
-		Permission:     "0755",
-		Verbose:        true, // Enable verbose output for detailed command logging.
-	}
+    config := binaryinstall.BinaryInstallConfig{
+        RemoteHost: "ec2-12-34-56-78.compute-1.amazonaws.com",
+        SSHUser:    "ec2-user",
+        SSHKeyPath: "/path/to/ssh-key.pem",
+        Uploads: []binaryinstall.BinaryUpload{
+            {
+                Path:          "/home/ec2-user/llmfs_Darwin_arm64.tar.gz",
+                DestinationDir: "/usr/local/bin",
+                Owner:         "root",
+                Permission:    "0755",
+                BindLowPorts:  false,
+            },
+            {
+                Path:          "/home/ec2-user/llmfs_Linux_x86_64.tar.gz",
+                DestinationDir: "/usr/local/bin",
+                Owner:         "root",
+                Permission:    "0755",
+                BindLowPorts:  true, // triggers setcap
+            },
+        },
+        BackupDir: "/home/ec2-user/bin.old",
+        Verbose:   true,
+    }
 
-	if err := binaryinstall.InstallBinaries(config); err != nil {
-		log.Fatalf("Installation failed: %v", err)
-	}
-	log.Println("Binaries installed successfully.")
+    if err := binaryinstall.InstallBinaries(config); err != nil {
+        log.Fatalf("Installation failed: %v", err)
+    }
+    log.Println("Binaries installed successfully.")
 }
 ```
 
 ### CLI Usage
 
-After installing or building the `binaryinstall` CLI, you can run it directly from your terminal. The CLI accepts multiple `-upload` flags to specify one or more tar.gz archives. The binary name is derived from each archive’s filename (e.g. `llmfs_Darwin_arm64.tar.gz` will install a binary named `llmfs`).
+After building or installing the `binaryinstall` CLI, run it from your terminal. Use the `-upload` flag **once per upload**, with a comma-delimited string to specify:
+
+- **path**: Full path to the tar.gz on the remote.
+- **dest**: Destination directory for the installed binary.
+- **owner**: Owner user/group.
+- **perm**: Permission string (e.g. 0755).
+- **bindlowports**: `true` or `false` if the binary needs `cap_net_bind_service`.
 
 For example:
 
@@ -89,22 +104,20 @@ For example:
   -remote ec2-12-34-56-78.compute-1.amazonaws.com \
   -sshuser ec2-user \
   -sshkey /path/to/ssh-key.pem \
-  -upload /home/ec2-user/llmfs_Darwin_arm64.tar.gz \
-  -upload /home/ec2-user/llmfs_Linux_x86_64.tar.gz \
-  -dest /usr/local/bin \
+  -upload "path=/home/ec2-user/llmfs_Darwin_arm64.tar.gz,dest=/usr/local/bin,owner=root,perm=0755,bindlowports=false" \
+  -upload "path=/home/ec2-user/llmfs_Linux_x86_64.tar.gz,dest=/usr/local/bin,owner=root,perm=0755,bindlowports=true" \
   -backup /home/ec2-user/bin.old \
-  -owner root \
-  -perm 0755 \
   -verbose
 ```
 
 This command will:
-- Connect to the remote host using the provided SSH credentials.
-- Process each specified `-upload` archive.
-- Automatically derive the binary name from each archive's filename.
-- Install the binary into `/usr/local/bin`, backing up any existing binary into `/home/ec2-user/bin.old`.
-- Set the ownership to `root` and permissions to `0755`.
-- Output detailed information about each command if the `-verbose` flag is enabled.
+- Connect to the remote host via SSH.
+- Process each `-upload` tar.gz archive.  
+- Derive the final binary name by stripping `.tar.gz` and everything after the first underscore (e.g. `llmfs_Linux_x86_64.tar.gz` → `llmfs`).
+- Place the binary in `/usr/local/bin` and back up any old version to `/home/ec2-user/bin.old`.
+- Apply the correct owner (`root`) and permissions (`0755`).
+- **If** an entry has `bindlowports=true`, run `sudo setcap 'cap_net_bind_service=+ep'` on the installed binary so it can listen on ports < 1024.
+- Show detailed command logs if `-verbose` is set.
 
 ## Test
 

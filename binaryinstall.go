@@ -12,6 +12,15 @@ import (
 	"time"
 )
 
+// BinaryUpload holds info about a single tar.gz upload to install.
+type BinaryUpload struct {
+	Path           string // path to the tar.gz on remote
+	DestinationDir string // install destination (e.g. /usr/local/bin)
+	Owner          string // e.g. "root"
+	Permission     string // e.g. "0755"
+	BindLowPorts   bool   // whether to call setcap for low-numbered port binding
+}
+
 // BinaryInstallConfig holds all configuration options needed to install one or more binaries remotely.
 type BinaryInstallConfig struct {
 	// Remote host connection info.
@@ -19,14 +28,11 @@ type BinaryInstallConfig struct {
 	SSHUser    string // e.g., "ec2-user"
 	SSHKeyPath string // e.g., "/path/to/my-key.pem"
 
-	// File locations.
-	UploadPaths    []string // List of full paths to the uploaded tar.gz files on the remote host.
-	DestinationDir string   // Destination directory for the binary (e.g., "/usr/local/bin")
-	BackupDir      string   // Backup directory for any existing binary (e.g., "/home/ec2-user/bin.old")
+	// Uploads is the new structured slice that replaces the old UploadPaths.
+	Uploads []BinaryUpload
 
-	// Ownership and permissions.
-	Owner      string // e.g., "root"
-	Permission string // e.g., "0755"
+	// Where to store existing binaries if we back them up.
+	BackupDir string
 
 	// Verbose mode: if true, prints out each command and its status.
 	Verbose bool
@@ -65,6 +71,11 @@ sudo chmod {{.Permission}} "{{.DestinationDir}}/{{.BinaryName}}"
 
 # 9) Remove the temporary directory
 rm -rf "{{.TempDir}}"
+
+{{ if .BindLowPorts }}
+# 10) Grant capability to bind to low-numbered ports
+sudo setcap 'cap_net_bind_service=+ep' "{{.DestinationDir}}/{{.BinaryName}}"
+{{ end }}
 `))
 
 // ScriptData holds data we'll substitute into scriptTemplate.
@@ -76,27 +87,28 @@ type ScriptData struct {
 	DestinationDir string
 	Owner          string
 	Permission     string
+	BindLowPorts   bool
 }
 
-// InstallBinaries processes each uploaded tar.gz file in parallel and installs the binary with a single SSH command.
+// InstallBinaries processes each tar.gz file in parallel, installing its binary with one SSH command.
 func InstallBinaries(config BinaryInstallConfig) error {
-	if len(config.UploadPaths) == 0 {
-		return fmt.Errorf("no upload paths provided")
+	if len(config.Uploads) == 0 {
+		return fmt.Errorf("no uploads provided")
 	}
 
 	var wg sync.WaitGroup
-	errChan := make(chan error, len(config.UploadPaths))
+	errChan := make(chan error, len(config.Uploads))
 
-	for _, upload := range config.UploadPaths {
+	for _, upload := range config.Uploads {
 		upload := upload // capture within loop
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if config.Verbose {
-				log.Printf("Processing upload: %s", upload)
+				log.Printf("Processing upload: %s", upload.Path)
 			}
 			if err := processUploadSingleCommand(config, upload); err != nil {
-				errChan <- fmt.Errorf("failed to process upload '%s': %w", upload, err)
+				errChan <- fmt.Errorf("failed to process upload '%s': %w", upload.Path, err)
 			}
 		}()
 	}
@@ -114,10 +126,10 @@ func InstallBinaries(config BinaryInstallConfig) error {
 
 // processUploadSingleCommand does every step in one single SSH call
 // by rendering scriptTemplate with the appropriate data.
-func processUploadSingleCommand(config BinaryInstallConfig, uploadPath string) error {
+func processUploadSingleCommand(config BinaryInstallConfig, upload BinaryUpload) error {
 	// Derive the binary name from the archive file. Example:
 	// "llmfs_Darwin_arm64.tar.gz" => "llmfs"
-	base := filepath.Base(uploadPath)
+	base := filepath.Base(upload.Path)
 	nameWithoutExt := strings.TrimSuffix(base, ".tar.gz")
 	parts := strings.Split(nameWithoutExt, "_")
 	if len(parts) == 0 {
@@ -131,12 +143,13 @@ func processUploadSingleCommand(config BinaryInstallConfig, uploadPath string) e
 	// Prepare data for the template
 	sData := ScriptData{
 		TempDir:        tempDir,
-		UploadPath:     uploadPath,
+		UploadPath:     upload.Path,
 		BinaryName:     binaryName,
 		BackupDir:      config.BackupDir,
-		DestinationDir: config.DestinationDir,
-		Owner:          config.Owner,
-		Permission:     config.Permission,
+		DestinationDir: upload.DestinationDir,
+		Owner:          upload.Owner,
+		Permission:     upload.Permission,
+		BindLowPorts:   upload.BindLowPorts,
 	}
 
 	// Render the template
@@ -149,13 +162,13 @@ func processUploadSingleCommand(config BinaryInstallConfig, uploadPath string) e
 	// Execute that one big script remotely with SSH.
 	if _, err := executeSSHCommand(config, script); err != nil {
 		if config.Verbose {
-			log.Printf("# SSH script for %s:\n%s", uploadPath, script)
+			log.Printf("# SSH script for %s:\n%s", upload.Path, script)
 		}
 		return err
 	}
 
 	if config.Verbose {
-		log.Printf("Successfully processed upload: %s (binary: %s)", uploadPath, binaryName)
+		log.Printf("Successfully processed upload: %s (binary: %s)", upload.Path, binaryName)
 	}
 	return nil
 }
